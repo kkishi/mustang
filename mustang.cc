@@ -11,9 +11,73 @@
 
 #define CTRL(c) ((c)&037)
 
-struct Line {
-  char* line;
-  int len;
+class String {
+public:
+  virtual ~String() {}
+  virtual const char* data() const = 0;
+  virtual char char_at(int i) const = 0;
+  virtual int size() const = 0;
+  virtual bool is_mutable() const = 0;
+  virtual bool insert_char(char c, int i) = 0;
+};
+
+class ExternalString : public String {
+public:
+  ExternalString(const char* data, int size)
+    : data_(data), size_(size) {}
+  virtual const char* data() const { return data_; }
+  virtual char char_at(int i) const { return data_[i]; }
+  virtual int size() const { return size_; }
+  virtual bool is_mutable() const { return false; }
+  virtual bool insert_char(char, int) { /* Write terrible things here.*/ }
+private:
+  const char* data_;
+  const int size_;
+};
+
+class AllocatedString : public String {
+public:
+  AllocatedString(const char* data, int size)
+    : data_(data, size) {}
+  virtual const char* data() const { return data_.c_str(); }
+  virtual char char_at(int i) const { return data_[i]; }
+  virtual int size() const { return data_.size(); }
+  virtual bool is_mutable() const { return true; }
+  virtual bool insert_char(char c, int i) {
+    data_ = data_.substr(0, i) + c + data_.substr(i, data_.size() - i);
+  }
+private:
+  std::string data_;
+};
+
+template<class Container>
+void DeletePointers(Container* c) {
+  for (typename Container::iterator it = c->begin(); it != c->end(); ++it) {
+    delete *it;
+  }
+}
+
+class PointerContainerDeleterImplBase {
+public:
+  virtual ~PointerContainerDeleterImplBase() {};
+};
+
+template<class Container>
+class PointerContainerDeleterImpl : public PointerContainerDeleterImplBase {
+public:
+  PointerContainerDeleterImpl(Container* c) : c_(c) {}
+  virtual ~PointerContainerDeleterImpl() { DeletePointers(c_); }
+private:
+  Container* c_;
+};
+
+class PointerContainerDeleter {
+public:
+  template<class Container> PointerContainerDeleter(Container* c)
+    : impl_(new PointerContainerDeleterImpl<Container>(c)) {}
+  ~PointerContainerDeleter() { delete impl_; }
+private:
+  PointerContainerDeleterImplBase* impl_;
 };
 
 int main(int argc, char** argv) {
@@ -59,15 +123,17 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::list<Line> lines(line_num);
+  std::list<String*> lines;
+  PointerContainerDeleter lines_deleter(&lines);
   char* p = file_content;
-  for (std::list<Line>::iterator it = lines.begin(); it != lines.end(); ++it) {
-    it->line = p;
-    it->len = 0;
+  for (int i = 0; i < line_num; ++i) {
+    char* data = p;
+    int size = 0;
     while (*p && *p != '\n') {
       ++p;
-      ++it->len;
+      ++size;
     }
+    lines.push_back(new ExternalString(data, size));
     ++p;
   }
 
@@ -78,13 +144,13 @@ int main(int argc, char** argv) {
 
   int height, width;
   getmaxyx(stdscr, height, width);
-  std::list<Line>::iterator it = lines.begin();
+  std::list<String*>::iterator it = lines.begin();
   for (int i = 0; i < height; ++i) {
     if (it == lines.end()) break;
     for (int j = 0; j < width; ++j) {
-      if (j == it->len) break;
+      if (j == (*it)->size()) break;
       move(i, j);
-      addch(it->line[j]);
+      addch((*it)->char_at(j));
     }
     ++it;
   }
@@ -94,7 +160,7 @@ int main(int argc, char** argv) {
   int buffer_x = 0;
   int cursor_x = 0;
   int cursor_y = 0;
-  std::list<Line>::iterator current_line = lines.begin();
+  std::list<String*>::iterator current_line = lines.begin();
   bool modified = false;
   for (;;) {
     refresh();
@@ -106,9 +172,9 @@ int main(int argc, char** argv) {
       } else if (c == CTRL('s')) {
         if (modified) {
           std::string result;
-          for (std::list<Line>::iterator it = lines.begin(); it != lines.end();
-               ++it) {
-            result += std::string(it->line) + std::string("\n");
+          for (std::list<String*>::iterator it = lines.begin();
+               it != lines.end(); ++it) {
+            result += std::string((*it)->data()) + std::string("\n");
           }
           int remaining = result.size();
           while (remaining) {
@@ -119,6 +185,7 @@ int main(int argc, char** argv) {
             }
             remaining -= wrote;
           }
+          modified = false;
         }
       }
     } else if (c == CTRL('p')) {
@@ -130,9 +197,9 @@ int main(int argc, char** argv) {
         if (buffer_y > 0) {
           --buffer_y;
           scrl(-1);
-          for (int i = 0; i < current_line->len; ++i) {
+          for (int i = 0; i < (*current_line)->size(); ++i) {
             move(0, i);
-            addch(current_line->line[i]);
+            addch((*current_line)->char_at(i));
           }
         }
       }
@@ -147,9 +214,9 @@ int main(int argc, char** argv) {
           ++buffer_y;
           scrl(1);
           if (current_line != lines.end()) {
-            for (int i = 0; i < current_line->len; ++i) {
+            for (int i = 0; i < (*current_line)->size(); ++i) {
               move(height - 1, i);
-              addch(current_line->line[i]);
+              addch((*current_line)->char_at(i));
             }
           }
         }
@@ -164,20 +231,34 @@ int main(int argc, char** argv) {
     } else if (c == CTRL('f')) {
       ++cursor_x;
       int max_x = current_line == lines.end() ? 0 :
-          std::min(width, current_line->len);
+        std::min(width, (*current_line)->size());
       cursor_x = std::min(cursor_x, max_x);
       move(cursor_y, cursor_x);
     } else if (c == CTRL('e')) {
       cursor_x = current_line == lines.end() ? 0 :
-          std::min(width, current_line->len);
+        std::min(width, (*current_line)->size());
       move(cursor_y, cursor_x);
     } else if (c == CTRL('a')) {
       cursor_x = 0;
       move(cursor_y, cursor_x);
     } else {
-      if ((flag & (O_WRONLY | O_RDWR))) {
-        addch(c);
+      if (!(flag & (O_WRONLY | O_RDWR))) continue;
+      if (current_line == lines.end()) {
+        lines.push_back(new AllocatedString("", 0));
+        --current_line;
       }
+      if (!(*current_line)->is_mutable()) {
+        *current_line = new AllocatedString((*current_line)->data(),
+                                            (*current_line)->size());
+      }
+      (*current_line)->insert_char(c, cursor_x);
+      modified = true;
+      for (int i = 0; i < (*current_line)->size(); ++i) {
+        move(cursor_y, i);
+        addch((*current_line)->char_at(i));
+      }
+      ++cursor_x;
+      move(cursor_y, cursor_x);
     }
   }
 
