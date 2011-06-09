@@ -203,6 +203,9 @@ int main(int argc, char** argv) {
           }
         }
       }
+      int max_x = current_line == lines.end() ? 0 :
+        std::min(width, (*current_line)->size());
+      cursor_x = std::min(cursor_x, max_x);
       move(cursor_y, cursor_x);
     } else if (c == CTRL('n')) {
       if (current_line == lines.end()) continue;
@@ -221,6 +224,9 @@ int main(int argc, char** argv) {
           }
         }
       }
+      int max_x = current_line == lines.end() ? 0 :
+        std::min(width, (*current_line)->size());
+      cursor_x = std::min(cursor_x, max_x);
       move(cursor_y, cursor_x);
     } else if (c == CTRL('b')) {
       --cursor_x;
