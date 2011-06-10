@@ -57,27 +57,27 @@ void DeletePointers(Container* c) {
   }
 }
 
-class PointerContainerDeleterImplBase {
+class AutoPointerDeleterImplBase {
 public:
-  virtual ~PointerContainerDeleterImplBase() {};
+  virtual ~AutoPointerDeleterImplBase() {};
 };
 
 template<class Container>
-class PointerContainerDeleterImpl : public PointerContainerDeleterImplBase {
+class AutoPointerDeleterImpl : public AutoPointerDeleterImplBase {
 public:
-  PointerContainerDeleterImpl(Container* c) : c_(c) {}
-  virtual ~PointerContainerDeleterImpl() { DeletePointers(c_); }
+  AutoPointerDeleterImpl(Container* c) : c_(c) {}
+  virtual ~AutoPointerDeleterImpl() { DeletePointers(c_); }
 private:
   Container* c_;
 };
 
-class PointerContainerDeleter {
+class AutoPointerDeleter {
 public:
-  template<class Container> PointerContainerDeleter(Container* c)
-    : impl_(new PointerContainerDeleterImpl<Container>(c)) {}
-  ~PointerContainerDeleter() { delete impl_; }
+  template<class Container> AutoPointerDeleter(Container* c)
+    : impl_(new AutoPointerDeleterImpl<Container>(c)) {}
+  ~AutoPointerDeleter() { delete impl_; }
 private:
-  PointerContainerDeleterImplBase* impl_;
+  AutoPointerDeleterImplBase* impl_;
 };
 
 int main(int argc, char** argv) {
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
   }
 
   std::list<String*> lines;
-  PointerContainerDeleter lines_deleter(&lines);
+  AutoPointerDeleter lines_deleter(&lines);
   char* p = file_content;
   for (int i = 0; i < line_num; ++i) {
     char* data = p;
@@ -259,10 +259,7 @@ int main(int argc, char** argv) {
       }
       (*current_line)->insert_char(c, cursor_x);
       modified = true;
-      for (int i = 0; i < (*current_line)->size(); ++i) {
-        move(cursor_y, i);
-        addch((*current_line)->char_at(i));
-      }
+      insch(c);
       ++cursor_x;
       move(cursor_y, cursor_x);
     }
